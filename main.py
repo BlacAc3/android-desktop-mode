@@ -70,7 +70,8 @@ _PACKAGE_JUNK_SEGMENTS = {
 
 KEYBINDINGS = [
     ("?", "Show this help screen"),
-    ("i  or  /", "Enter INSERT mode (jump to search bar)"),
+    ("/", "Jump to the search bar (INSERT mode)"),
+    ("i", "Enter INSERT mode (jump to search bar)"),
     ("Escape", "Exit INSERT mode, return to NORMAL mode"),
     ("h", "Focus the filter panel (left)"),
     ("l", "Focus the app list (right)"),
@@ -81,7 +82,7 @@ KEYBINDINGS = [
     ("Enter", "Launch selected app / apply selected filter"),
     ("Ctrl+R", "Refresh app list from device"),
     ("q", "Quit (NORMAL mode)"),
-    ("Ctrl+Q", "Quit"),
+    ("Ctrl+C", "Quit"),
 ]
 
 
@@ -218,7 +219,7 @@ class HelpScreen(ModalScreen):
             yield Static("\nPress Esc, ?, or Enter to close", id="help-footer")
 
     def on_key(self, event: events.Key) -> None:
-        if event.key in ("escape", "question_mark", "enter", "?"):
+        if event.key in ("escape", "question_mark", "enter"):
             self.dismiss()
         event.stop()
 
@@ -353,9 +354,15 @@ class ScrcpyLauncher(App):
     }
     """
 
+    # Global bindings: also drive the visible Footer hints. These only ever
+    # fire when the currently focused widget does NOT itself consume the key
+    # (e.g. typing "/" or "?" into the search Input is handled by the Input
+    # itself and never reaches these), so search text entry is unaffected.
     BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
+        ("ctrl+c", "quit", "Quit"),
         ("ctrl+r", "refresh_apps", "Refresh"),
+        ("question_mark", "show_help", "Help"),
+        ("slash", "focus_search", "Search"),
     ]
 
     def __init__(self):
@@ -604,39 +611,54 @@ class ScrcpyLauncher(App):
         self.push_screen(LoadingScreen())
         self.load_apps()
 
+    async def action_show_help(self) -> None:
+        if self.is_loading:
+            return
+        await self.push_screen(HelpScreen())
+
+    def action_focus_search(self) -> None:
+        if self.is_loading:
+            return
+        self.mode = "insert"
+        self.query_one("#search-input", Input).focus()
+        self.update_status()
+
+    def _get_focused_navigable(self):
+        """Return the currently focused DataTable/OptionList, if any.
+
+        Uses the active screen's focus tracking (self.screen.focused) rather
+        than any App-level shortcut, since focus is tracked per-Screen.
+        """
+        widget = self.screen.focused
+        if isinstance(widget, (DataTable, OptionList)):
+            return widget
+        return None
+
     def _goto_edge(self, top: bool) -> None:
-        focused = self.focused
-        if isinstance(focused, DataTable):
-            if focused.row_count:
-                row = 0 if top else focused.row_count - 1
-                focused.move_cursor(row=row)
-        elif isinstance(focused, OptionList):
-            try:
-                if top and hasattr(focused, "action_first"):
-                    focused.action_first()
-                elif not top and hasattr(focused, "action_last"):
-                    focused.action_last()
-            except Exception:
-                pass
+        widget = self._get_focused_navigable()
+        if widget is None:
+            return
+        if isinstance(widget, DataTable):
+            if widget.row_count:
+                row = 0 if top else widget.row_count - 1
+                widget.move_cursor(row=row)
+        elif isinstance(widget, OptionList):
+            if top:
+                widget.action_first()
+            else:
+                widget.action_last()
 
     def _move_cursor(self, down: bool) -> None:
-        focused = self.focused
-        try:
-            if isinstance(focused, DataTable):
-                if down and hasattr(focused, "action_cursor_down"):
-                    focused.action_cursor_down()
-                elif not down and hasattr(focused, "action_cursor_up"):
-                    focused.action_cursor_up()
-            elif isinstance(focused, OptionList):
-                if down and hasattr(focused, "action_cursor_down"):
-                    focused.action_cursor_down()
-                elif not down and hasattr(focused, "action_cursor_up"):
-                    focused.action_cursor_up()
-        except Exception:
-            pass
+        widget = self._get_focused_navigable()
+        if widget is None:
+            return
+        if down:
+            widget.action_cursor_down()
+        else:
+            widget.action_cursor_up()
 
     async def on_key(self, event: events.Key) -> None:
-        # While loading, or on modal screens, absorb input at the app level too.
+        # While loading, or on modal screens, absorb navigation input here too.
         if self.is_loading or isinstance(
             self.screen, (HelpScreen, NoDeviceScreen, LoadingScreen)
         ):
@@ -651,15 +673,10 @@ class ScrcpyLauncher(App):
                 event.stop()
             return
 
-        # NORMAL mode vim-style bindings
-        if event.character == "?":
-            await self.push_screen(HelpScreen())
-            event.stop()
-        elif event.key in ("i", "slash"):
-            # "/" or "i" jumps straight to the search tab (INSERT mode).
-            self.mode = "insert"
-            self.query_one("#search-input", Input).focus()
-            self.update_status()
+        # NORMAL mode vim-style bindings (mode-gated, so typing in the
+        # search Input while in INSERT mode is never intercepted).
+        if event.key == "i":
+            self.action_focus_search()
             event.stop()
         elif event.key == "h":
             self.query_one("#filter-list", OptionList).focus()
@@ -675,10 +692,10 @@ class ScrcpyLauncher(App):
         elif event.key in ("k", "up"):
             self._move_cursor(down=False)
             event.stop()
-        elif event.character == "g":
+        elif event.key == "g":
             self._goto_edge(top=True)
             event.stop()
-        elif event.character == "G":
+        elif event.key == "G":
             self._goto_edge(top=False)
             event.stop()
         elif event.key == "q":

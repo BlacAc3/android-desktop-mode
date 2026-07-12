@@ -1,6 +1,7 @@
 # pip install textual
 
 import asyncio
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -10,32 +11,71 @@ from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
-from textual.widgets import DataTable, Footer, Header, Input, OptionList, Static
+from textual.widgets import (
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    LoadingIndicator,
+    OptionList,
+    Static,
+)
 from textual.widgets.option_list import Option
 
+# Bulk-fetch package list + raw label text in a single adb shell round-trip.
+# Captures the FULL nonLocalizedLabel value (up to the next known dumpsys
+# field) instead of truncating at the first space, so multi-word app names
+# (e.g. "Google Play Services") survive intact.
 BULK_FETCH_CMD = (
     "sys_pkgs=$(pm list packages -s 2>/dev/null | sed 's/package://'); "
     "user_pkgs=$(pm list packages -3 2>/dev/null | sed 's/package://'); "
-    "for p in $sys_pkgs; do "
-    'l=$(dumpsys package "$p" 2>/dev/null | grep -m1 -oE "applicationLabel=[^ ]+" | sed \'s/applicationLabel=//\'); '
-    'if [ -z "$l" ]; then l="$p"; fi; '
-    'echo "SYS::$p::$l"; '
-    "done; "
-    "for p in $user_pkgs; do "
-    'l=$(dumpsys package "$p" 2>/dev/null | grep -m1 -oE "applicationLabel=[^ ]+" | sed \'s/applicationLabel=//\'); '
-    'if [ -z "$l" ]; then l="$p"; fi; '
-    'echo "USR::$p::$l"; '
-    "done"
+    "extract() { "
+    '  dumpsys package "$1" 2>/dev/null '
+    '  | grep -m1 -oE "nonLocalizedLabel=.*" '
+    "  | sed -E 's/nonLocalizedLabel=//; s/ (icon|labelRes|banner|logo|theme|flags|dataDir)=.*$//'; "
+    "}; "
+    'for p in $sys_pkgs; do l=$(extract "$p"); [ -z "$l" ] && l="$p"; echo "SYS::$p::$l"; done; '
+    'for p in $user_pkgs; do l=$(extract "$p"); [ -z "$l" ] && l="$p"; echo "USR::$p::$l"; done'
 )
+
+# Display resolution/DPI target derived from the host panel's reported
+# aspect: 1920x1080 @ 1.32x scale on a 14" display. Standard Android baseline
+# density is 160dpi; scaling that by the reported 1.32x factor gives a more
+# faithful effective density than an arbitrary flat value.
+SCRCPY_WIDTH = 1920
+SCRCPY_HEIGHT = 1080
+SCRCPY_SCALE_FACTOR = 1.32
+SCRCPY_BASE_DPI = 160
+SCRCPY_DPI = round(SCRCPY_BASE_DPI * SCRCPY_SCALE_FACTOR)  # ≈ 211
+
+# Segments treated as noise when deriving a friendly name from a bare
+# package id (i.e. when the device gave us no usable label at all).
+_PACKAGE_JUNK_SEGMENTS = {
+    "com",
+    "org",
+    "net",
+    "io",
+    "co",
+    "app",
+    "apps",
+    "android",
+    "inc",
+    "corp",
+    "ltd",
+    "mobile",
+    "client",
+    "prod",
+    "release",
+}
 
 KEYBINDINGS = [
     ("?", "Show this help screen"),
-    ("i  or  /", "Enter INSERT mode (focus search bar)"),
+    ("i  or  /", "Enter INSERT mode (jump to search bar)"),
     ("Escape", "Exit INSERT mode, return to NORMAL mode"),
     ("h", "Focus the filter panel (left)"),
     ("l", "Focus the app list (right)"),
-    ("j", "Move cursor down"),
-    ("k", "Move cursor up"),
+    ("j  /  Down", "Move cursor down (filter or app list)"),
+    ("k  /  Up", "Move cursor up (filter or app list)"),
     ("g", "Jump to top of list"),
     ("G", "Jump to bottom of list"),
     ("Enter", "Launch selected app / apply selected filter"),
@@ -45,11 +85,96 @@ KEYBINDINGS = [
 ]
 
 
+def _friendly_from_package(package: str) -> str:
+    """Derive a readable name from a bare package id when no label exists."""
+    raw_parts = [p for p in package.split(".") if p]
+    parts = [p for p in raw_parts if p.lower() not in _PACKAGE_JUNK_SEGMENTS]
+    if not parts:
+        parts = raw_parts or [package]
+    name_parts = parts[-2:] if len(parts) >= 2 else parts
+    name = " ".join(name_parts)
+    name = re.sub(r"[_\-]+", " ", name)
+    name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)  # split camelCase
+    name = re.sub(r"\s+", " ", name).strip()
+    return name.title() if name else package
+
+
+def clean_app_label(raw_label: str, package: str) -> str:
+    """Strip dumpsys/system jargon from a raw label and format it cleanly."""
+    label = (raw_label or "").strip()
+
+    # Strip surrounding quotes/braces artifacts dumpsys sometimes leaves in.
+    label = label.strip("\"'")
+    label = re.sub(r"\{.*?\}", "", label).strip()
+    label = label.strip(" {}();,")
+
+    if not label or label.lower() in ("null", "none") or label == package:
+        return _friendly_from_package(package)
+
+    # Collapse stray whitespace and title-case single ALLCAPS/underscored
+    # tokens (e.g. "SOME_APP_NAME" -> "Some App Name"), leave normal mixed
+    # case labels (e.g. "WhatsApp") untouched.
+    label = re.sub(r"\s+", " ", label).strip()
+    if label.isupper() or "_" in label:
+        label = re.sub(r"[_]+", " ", label).strip()
+        label = label.title()
+
+    return label or _friendly_from_package(package)
+
+
 @dataclass
 class AndroidApp:
     package: str
     label: str
     app_type: str  # "user" or "system"
+
+
+class LoadingScreen(ModalScreen):
+    """Blocking modal shown while apps are being fetched from the device.
+    Swallows all key input so the user cannot interact until loading ends.
+    """
+
+    CSS = """
+    LoadingScreen {
+        align: center middle;
+        background: $surface 60%;
+    }
+    #loading-box {
+        width: 44;
+        height: auto;
+        border: heavy $accent;
+        background: $panel;
+        padding: 1 2;
+        align: center middle;
+    }
+    #loading-title {
+        text-style: bold;
+        color: $accent;
+        content-align: center middle;
+        width: 100%;
+        margin-bottom: 1;
+    }
+    LoadingIndicator {
+        height: 3;
+    }
+    #loading-msg {
+        content-align: center middle;
+        width: 100%;
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Container(id="loading-box"):
+            yield Static("⏳  Fetching Installed Apps", id="loading-title")
+            yield LoadingIndicator()
+            yield Static("Please wait, this may take a moment...", id="loading-msg")
+
+    def on_key(self, event: events.Key) -> None:
+        # Absorb all key presses; nothing is actionable while loading.
+        event.stop()
+        event.prevent_default()
 
 
 class HelpScreen(ModalScreen):
@@ -95,6 +220,7 @@ class HelpScreen(ModalScreen):
     def on_key(self, event: events.Key) -> None:
         if event.key in ("escape", "question_mark", "enter", "?"):
             self.dismiss()
+        event.stop()
 
 
 class NoDeviceScreen(Screen):
@@ -139,6 +265,7 @@ class NoDeviceScreen(Screen):
     def on_key(self, event: events.Key) -> None:
         if event.key == "q":
             self.app.exit()
+        event.stop()
 
 
 class ScrcpyLauncher(App):
@@ -238,6 +365,7 @@ class ScrcpyLauncher(App):
         self.current_filter: str = "all"
         self.mode: str = "insert"
         self.status_text: str = "Loading installed apps..."
+        self.is_loading: bool = True
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -271,9 +399,14 @@ class ScrcpyLauncher(App):
 
         has_device, dev_msg = await self.check_adb_device()
         if not has_device:
+            self.is_loading = False
             await self.push_screen(NoDeviceScreen(dev_msg))
             return
 
+        # Block all interaction with a modal loading overlay until the
+        # bulk adb fetch/parse completes.
+        self.is_loading = True
+        await self.push_screen(LoadingScreen())
         self.load_apps()
 
     async def check_adb_device(self):
@@ -328,7 +461,7 @@ class ScrcpyLauncher(App):
             stdout, _ = await proc.communicate()
         except Exception as e:
             self.status_text = f"Error running adb: {e}"
-            self.update_status()
+            self._finish_loading()
             return
 
         output = stdout.decode(errors="ignore")
@@ -341,13 +474,13 @@ class ScrcpyLauncher(App):
             parts = line.split("::", 2)
             if len(parts) != 3:
                 continue
-            tag, pkg, label = parts
+            tag, pkg, raw_label = parts
             pkg = pkg.strip()
-            label = label.strip() or pkg
             if not pkg or pkg in seen:
                 continue
             seen.add(pkg)
             app_type = "system" if tag == "SYS" else "user"
+            label = clean_app_label(raw_label, pkg)
             apps.append(AndroidApp(package=pkg, label=label, app_type=app_type))
 
         apps.sort(key=lambda a: a.label.lower())
@@ -358,6 +491,19 @@ class ScrcpyLauncher(App):
             self.status_text = f"{len(apps)} apps loaded."
         else:
             self.status_text = "No apps found on device."
+
+        self._finish_loading()
+
+    def _finish_loading(self) -> None:
+        """Dismiss the loading overlay and restore normal interaction."""
+        self.is_loading = False
+        if isinstance(self.screen, LoadingScreen):
+            self.pop_screen()
+        self.mode = "insert"
+        try:
+            self.query_one("#search-input", Input).focus()
+        except Exception:
+            pass
         self.update_status()
 
     def update_status(self) -> None:
@@ -427,7 +573,7 @@ class ScrcpyLauncher(App):
             self.apply_filters()
 
     def launch_scrcpy(self, package_id: str) -> None:
-        if not package_id:
+        if not package_id or self.is_loading:
             return
         self.status_text = f"Launching {package_id} via scrcpy..."
         self.update_status()
@@ -435,7 +581,7 @@ class ScrcpyLauncher(App):
             subprocess.Popen(
                 [
                     "scrcpy",
-                    "--new-display=1920x1080/240",
+                    f"--new-display={SCRCPY_WIDTH}x{SCRCPY_HEIGHT}/{SCRCPY_DPI}",
                     f"--start-app={package_id}",
                 ],
                 stdout=subprocess.DEVNULL,
@@ -451,6 +597,11 @@ class ScrcpyLauncher(App):
         self.update_status()
 
     def action_refresh_apps(self) -> None:
+        if self.is_loading:
+            return
+        self.is_loading = True
+        self.status_text = "Refreshing app list..."
+        self.push_screen(LoadingScreen())
         self.load_apps()
 
     def _goto_edge(self, top: bool) -> None:
@@ -485,8 +636,10 @@ class ScrcpyLauncher(App):
             pass
 
     async def on_key(self, event: events.Key) -> None:
-        # Modal screens (help / no-device) handle their own keys.
-        if isinstance(self.screen, (HelpScreen, NoDeviceScreen)):
+        # While loading, or on modal screens, absorb input at the app level too.
+        if self.is_loading or isinstance(
+            self.screen, (HelpScreen, NoDeviceScreen, LoadingScreen)
+        ):
             return
 
         if self.mode == "insert":
@@ -503,6 +656,7 @@ class ScrcpyLauncher(App):
             await self.push_screen(HelpScreen())
             event.stop()
         elif event.key in ("i", "slash"):
+            # "/" or "i" jumps straight to the search tab (INSERT mode).
             self.mode = "insert"
             self.query_one("#search-input", Input).focus()
             self.update_status()
@@ -515,10 +669,10 @@ class ScrcpyLauncher(App):
             self.query_one("#apps-table", DataTable).focus()
             self.update_status()
             event.stop()
-        elif event.key == "j":
+        elif event.key in ("j", "down"):
             self._move_cursor(down=True)
             event.stop()
-        elif event.key == "k":
+        elif event.key in ("k", "up"):
             self._move_cursor(down=False)
             event.stop()
         elif event.character == "g":

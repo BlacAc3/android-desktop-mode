@@ -48,6 +48,8 @@ SCRCPY_SCALE_FACTOR = 1.32
 SCRCPY_BASE_DPI = 160
 SCRCPY_DPI = round(SCRCPY_BASE_DPI * SCRCPY_SCALE_FACTOR)  # ≈ 211
 
+FILTER_PANEL_WIDTH = "28%"
+
 # Segments treated as noise when deriving a friendly name from a bare
 # package id (i.e. when the device gave us no usable label at all).
 _PACKAGE_JUNK_SEGMENTS = {
@@ -72,16 +74,17 @@ KEYBINDINGS = [
     ("?", "Show this help screen"),
     ("/", "Jump to the search bar (INSERT mode)"),
     ("i", "Enter INSERT mode (jump to search bar)"),
-    ("Escape", "Exit INSERT mode, return to NORMAL mode"),
+    ("Escape", "Exit search bar, return focus to app list"),
     ("h", "Focus the filter panel (left)"),
     ("l", "Focus the app list (right)"),
     ("j  /  Down", "Move cursor down (filter or app list)"),
     ("k  /  Up", "Move cursor up (filter or app list)"),
     ("g", "Jump to top of list"),
     ("G", "Jump to bottom of list"),
+    ("m", "Maximize / restore the focused panel"),
     ("Enter", "Launch selected app / apply selected filter"),
     ("Ctrl+R", "Refresh app list from device"),
-    ("q", "Quit (NORMAL mode)"),
+    ("q", "Quit (when not typing in search)"),
     ("Ctrl+C", "Quit"),
 ]
 
@@ -354,15 +357,16 @@ class ScrcpyLauncher(App):
     }
     """
 
-    # Global bindings: also drive the visible Footer hints. These only ever
-    # fire when the currently focused widget does NOT itself consume the key
-    # (e.g. typing "/" or "?" into the search Input is handled by the Input
-    # itself and never reaches these), so search text entry is unaffected.
+    # Global bindings also drive the visible Footer hints. These only fire
+    # when the currently focused widget doesn't itself consume the key —
+    # typing "/" or "?" while the search Input is focused is handled by the
+    # Input's own character-insertion logic and never reaches these.
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+r", "refresh_apps", "Refresh"),
         ("question_mark", "show_help", "Help"),
         ("slash", "focus_search", "Search"),
+        ("m", "toggle_maximize", "Maximize"),
     ]
 
     def __init__(self):
@@ -370,9 +374,9 @@ class ScrcpyLauncher(App):
         self.all_apps: List[AndroidApp] = []
         self.filtered_apps: List[AndroidApp] = []
         self.current_filter: str = "all"
-        self.mode: str = "insert"
         self.status_text: str = "Loading installed apps..."
         self.is_loading: bool = True
+        self.maximized_panel: Optional[str] = None  # "filter" | "apps" | None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -402,7 +406,6 @@ class ScrcpyLauncher(App):
         filter_list.highlighted = 0
 
         self.query_one("#search-input", Input).focus()
-        self.mode = "insert"
 
         has_device, dev_msg = await self.check_adb_device()
         if not has_device:
@@ -506,23 +509,34 @@ class ScrcpyLauncher(App):
         self.is_loading = False
         if isinstance(self.screen, LoadingScreen):
             self.pop_screen()
-        self.mode = "insert"
         try:
             self.query_one("#search-input", Input).focus()
         except Exception:
             pass
         self.update_status()
 
+    def _current_mode_label(self) -> str:
+        try:
+            focused = self.screen.focused
+        except Exception:
+            focused = None
+        return "-- INSERT --" if isinstance(focused, Input) else "-- NORMAL --"
+
     def update_status(self) -> None:
         try:
             status = self.query_one("#status-bar", Static)
-            mode_label = "-- INSERT --" if self.mode == "insert" else "-- NORMAL --"
+            mode_label = self._current_mode_label()
             filter_label = {"all": "All", "user": "User", "system": "System"}.get(
                 self.current_filter, "All"
             )
             count = len(self.filtered_apps)
+            max_label = (
+                f"  |  Maximized: {self.maximized_panel}"
+                if self.maximized_panel
+                else ""
+            )
             status.update(
-                f"{mode_label}  |  Filter: {filter_label}  |  {count} apps  |  {self.status_text}  |  Press ? for help"
+                f"{mode_label}  |  Filter: {filter_label}  |  {count} apps  |  {self.status_text}{max_label}  |  Press ? for help"
             )
         except Exception:
             pass
@@ -619,16 +633,46 @@ class ScrcpyLauncher(App):
     def action_focus_search(self) -> None:
         if self.is_loading:
             return
-        self.mode = "insert"
         self.query_one("#search-input", Input).focus()
         self.update_status()
 
-    def _get_focused_navigable(self):
-        """Return the currently focused DataTable/OptionList, if any.
+    def action_toggle_maximize(self) -> None:
+        if self.is_loading or isinstance(
+            self.screen, (HelpScreen, NoDeviceScreen, LoadingScreen)
+        ):
+            return
 
-        Uses the active screen's focus tracking (self.screen.focused) rather
-        than any App-level shortcut, since focus is tracked per-Screen.
-        """
+        filter_panel = self.query_one("#filter-panel")
+        main_panel = self.query_one("#main-panel")
+
+        if self.maximized_panel is None:
+            focused = self.screen.focused
+            if isinstance(focused, OptionList) and focused.id == "filter-list":
+                target = "filter"
+            elif isinstance(focused, DataTable) and focused.id == "apps-table":
+                target = "apps"
+            else:
+                # Nothing sensible to maximize (e.g. search input focused).
+                return
+
+            self.maximized_panel = target
+            if target == "filter":
+                main_panel.styles.display = "none"
+                filter_panel.styles.width = "100%"
+            else:
+                filter_panel.styles.display = "none"
+            self.status_text = f"Maximized {'filter panel' if target == 'filter' else 'app list'} (press m to restore)"
+        else:
+            main_panel.styles.display = "block"
+            filter_panel.styles.display = "block"
+            filter_panel.styles.width = FILTER_PANEL_WIDTH
+            self.maximized_panel = None
+            self.status_text = "Restored panel layout"
+
+        self.update_status()
+
+    def _get_focused_navigable(self):
+        """Return the currently focused DataTable/OptionList, if any."""
         widget = self.screen.focused
         if isinstance(widget, (DataTable, OptionList)):
             return widget
@@ -658,23 +702,25 @@ class ScrcpyLauncher(App):
             widget.action_cursor_up()
 
     async def on_key(self, event: events.Key) -> None:
-        # While loading, or on modal screens, absorb navigation input here too.
+        # While loading, or on modal screens, absorb navigation input here.
         if self.is_loading or isinstance(
             self.screen, (HelpScreen, NoDeviceScreen, LoadingScreen)
         ):
             return
 
-        if self.mode == "insert":
+        # Determine mode directly from actual focus (not a stale flag) so
+        # navigation keys can never desync from what's really focused.
+        focused = self.screen.focused
+
+        if isinstance(focused, Input):
             if event.key == "escape":
-                self.mode = "normal"
-                table = self.query_one("#apps-table", DataTable)
-                table.focus()
+                self.query_one("#apps-table", DataTable).focus()
                 self.update_status()
                 event.stop()
             return
 
-        # NORMAL mode vim-style bindings (mode-gated, so typing in the
-        # search Input while in INSERT mode is never intercepted).
+        # Focus is NOT on the search Input: vim-style bindings are always
+        # live here, regardless of prior key history.
         if event.key == "i":
             self.action_focus_search()
             event.stop()
@@ -697,6 +743,9 @@ class ScrcpyLauncher(App):
             event.stop()
         elif event.key == "G":
             self._goto_edge(top=False)
+            event.stop()
+        elif event.key == "m":
+            self.action_toggle_maximize()
             event.stop()
         elif event.key == "q":
             self.exit()

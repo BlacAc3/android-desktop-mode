@@ -80,3 +80,15 @@ INFO: Renderer: opengl
 INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
 INFO: Trilinear filtering enabled
 INFO: Texture: 1920x1080
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  5c6c35e6                        device  2112123AG
+INFO: Renderer: opengl
+INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
+INFO: Trilinear filtering enabled
+INFO: Texture: 1920x1080
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 408.4 MB/s (732226 bytes in 0.002s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+[server] INFO: New display: 1920x1080/320 (id=41)
+[server] INFO: Starting app "LocalSend" [org.localsend.localsend_app] on display 41...

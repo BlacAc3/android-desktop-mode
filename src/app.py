@@ -398,7 +398,6 @@ class ScrcpyLauncher(App):
                 "-f",
                 "--window-title",
                 f"App: {package_id}",
-                "--show-touches",
                 "--push-target=/sdcard/",
                 f"--start-app={package_id}",
             ]

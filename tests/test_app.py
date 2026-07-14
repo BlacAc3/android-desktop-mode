@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from src.app import ScrcpyLauncher
 from src.models import AndroidApp
 
@@ -19,10 +19,12 @@ async def test_apply_filters():
     app.current_filter = "user"
     
     # Mocking necessary methods that interact with the UI/table
-    app.query_one = AsyncMock()
-    app.update_status = AsyncMock()
-    app.populate_table = AsyncMock()
+    input_mock = AsyncMock()
+    input_mock.value = ""
+    app.query_one = AsyncMock(return_value=input_mock)
+    app.update_status = MagicMock()
+    app.populate_table = MagicMock()
     
-    app.apply_filters()
+    await app.apply_filters()
     assert len(app.filtered_apps) == 1
     assert app.filtered_apps[0].package == "com.user"

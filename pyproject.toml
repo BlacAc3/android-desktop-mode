@@ -26,3 +26,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:'asyncio.get_event_loop_policy' is deprecated:DeprecationWarning:pytest_asyncio.plugin",
+    "ignore:'asyncio.set_event_loop_policy' is deprecated:DeprecationWarning:pytest_asyncio.plugin",
+]
+

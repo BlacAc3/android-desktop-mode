@@ -284,7 +284,7 @@ class ScrcpyLauncher(App):
 
         apps.sort(key=lambda a: a.label.lower())
         self.all_apps = apps
-        self.apply_filters()
+        await self.apply_filters()
 
         if apps:
             self.status_text = f"{len(apps)} apps loaded."
@@ -337,8 +337,8 @@ class ScrcpyLauncher(App):
         if apps:
             table.move_cursor(row=0)
 
-    def apply_filters(self) -> None:
-        query = self.query_one("#search-input", Input).value.strip().lower()
+    async def apply_filters(self) -> None:
+        query = (await self.query_one("#search-input", Input)).value.strip().lower()
         apps = self.all_apps
 
         if self.current_filter == "user":
@@ -357,10 +357,10 @@ class ScrcpyLauncher(App):
         self.populate_table(apps)
         self.update_status()
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    async def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "search-input":
             return
-        self.apply_filters()
+        await self.apply_filters()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "search-input":
@@ -373,13 +373,15 @@ class ScrcpyLauncher(App):
         if pkg:
             self.launch_scrcpy(pkg)
 
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+    async def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
+    ) -> None:
         if event.option_list.id != "filter-list":
             return
         option_id = event.option.id
         if option_id in ("all", "user", "system"):
             self.current_filter = option_id
-            self.apply_filters()
+            await self.apply_filters()
 
     def launch_scrcpy(self, package_id: str) -> None:
         if not package_id or self.is_loading:

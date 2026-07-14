@@ -1,0 +1,17 @@
+KEYBINDINGS = [
+    ("?", "Show this help screen"),
+    ("/", "Jump to the search bar (INSERT mode)"),
+    ("i", "Enter INSERT mode (jump to search bar)"),
+    ("Escape", "Exit search bar, return focus to app list"),
+    ("h", "Focus the filter panel (left)"),
+    ("l", "Focus the app list (right)"),
+    ("j  /  Down", "Move cursor down (filter or app list)"),
+    ("k  /  Up", "Move cursor up (filter or app list)"),
+    ("g", "Jump to top of list"),
+    ("G", "Jump to bottom of list"),
+    ("m", "Maximize / restore the focused panel"),
+    ("Enter", "Launch selected app / apply selected filter"),
+    ("Ctrl+R", "Refresh app list from device"),
+    ("q", "Quit (when not typing in search)"),
+    ("Ctrl+C", "Quit"),
+]

@@ -1,31 +1,26 @@
-# pip install textual
-
 import asyncio
-import re
 import shutil
 import subprocess
-from dataclasses import dataclass
 from typing import List, Optional
 
+from screeninfo import get_monitors
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.screen import ModalScreen, Screen
-from textual.widgets import (
-    DataTable,
-    Footer,
-    Header,
-    Input,
-    LoadingIndicator,
-    OptionList,
-    Static,
-)
+from textual.widgets import DataTable, Footer, Header, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
-# Bulk-fetch package list + raw label text in a single adb shell round-trip.
-# Captures the FULL nonLocalizedLabel value (up to the next known dumpsys
-# field) instead of truncating at the first space, so multi-word app names
-# (e.g. "Google Play Services") survive intact.
+from models import AndroidApp
+from screens import (
+    ErrorScreen,
+    HelpScreen,
+    LoadingScreen,
+    NoDeviceScreen,
+    UnauthorizedScreen,
+)
+from utils import clean_app_label
+
+# Bulk-fetch command
 BULK_FETCH_CMD = (
     "sys_pkgs=$(pm list packages -s 2>/dev/null | sed 's/package://'); "
     "user_pkgs=$(pm list packages -3 2>/dev/null | sed 's/package://'); "
@@ -38,238 +33,8 @@ BULK_FETCH_CMD = (
     'for p in $user_pkgs; do l=$(extract "$p"); [ -z "$l" ] && l="$p"; echo "USR::$p::$l"; done'
 )
 
-# Display resolution/DPI target derived from the host panel's reported
-# aspect: 1920x1080 @ 1.32x scale on a 14" display. Standard Android baseline
-# density is 160dpi; scaling that by the reported 1.32x factor gives a more
-# faithful effective density than an arbitrary flat value.
-SCRCPY_WIDTH = 1920
-SCRCPY_HEIGHT = 1080
-SCRCPY_SCALE_FACTOR = 1.32
-SCRCPY_BASE_DPI = 160
-SCRCPY_DPI = round(SCRCPY_BASE_DPI * SCRCPY_SCALE_FACTOR)  # ≈ 211
-
+# Constants
 FILTER_PANEL_WIDTH = "28%"
-
-# Segments treated as noise when deriving a friendly name from a bare
-# package id (i.e. when the device gave us no usable label at all).
-_PACKAGE_JUNK_SEGMENTS = {
-    "com",
-    "org",
-    "net",
-    "io",
-    "co",
-    "app",
-    "apps",
-    "android",
-    "inc",
-    "corp",
-    "ltd",
-    "mobile",
-    "client",
-    "prod",
-    "release",
-}
-
-KEYBINDINGS = [
-    ("?", "Show this help screen"),
-    ("/", "Jump to the search bar (INSERT mode)"),
-    ("i", "Enter INSERT mode (jump to search bar)"),
-    ("Escape", "Exit search bar, return focus to app list"),
-    ("h", "Focus the filter panel (left)"),
-    ("l", "Focus the app list (right)"),
-    ("j  /  Down", "Move cursor down (filter or app list)"),
-    ("k  /  Up", "Move cursor up (filter or app list)"),
-    ("g", "Jump to top of list"),
-    ("G", "Jump to bottom of list"),
-    ("m", "Maximize / restore the focused panel"),
-    ("Enter", "Launch selected app / apply selected filter"),
-    ("Ctrl+R", "Refresh app list from device"),
-    ("q", "Quit (when not typing in search)"),
-    ("Ctrl+C", "Quit"),
-]
-
-
-def _friendly_from_package(package: str) -> str:
-    """Derive a readable name from a bare package id when no label exists."""
-    raw_parts = [p for p in package.split(".") if p]
-    parts = [p for p in raw_parts if p.lower() not in _PACKAGE_JUNK_SEGMENTS]
-    if not parts:
-        parts = raw_parts or [package]
-    name_parts = parts[-2:] if len(parts) >= 2 else parts
-    name = " ".join(name_parts)
-    name = re.sub(r"[_\-]+", " ", name)
-    name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)  # split camelCase
-    name = re.sub(r"\s+", " ", name).strip()
-    return name.title() if name else package
-
-
-def clean_app_label(raw_label: str, package: str) -> str:
-    """Strip dumpsys/system jargon from a raw label and format it cleanly."""
-    label = (raw_label or "").strip()
-
-    # Strip surrounding quotes/braces artifacts dumpsys sometimes leaves in.
-    label = label.strip("\"'")
-    label = re.sub(r"\{.*?\}", "", label).strip()
-    label = label.strip(" {}();,")
-
-    if not label or label.lower() in ("null", "none") or label == package:
-        return _friendly_from_package(package)
-
-    # Collapse stray whitespace and title-case single ALLCAPS/underscored
-    # tokens (e.g. "SOME_APP_NAME" -> "Some App Name"), leave normal mixed
-    # case labels (e.g. "WhatsApp") untouched.
-    label = re.sub(r"\s+", " ", label).strip()
-    if label.isupper() or "_" in label:
-        label = re.sub(r"[_]+", " ", label).strip()
-        label = label.title()
-
-    return label or _friendly_from_package(package)
-
-
-@dataclass
-class AndroidApp:
-    package: str
-    label: str
-    app_type: str  # "user" or "system"
-
-
-class LoadingScreen(ModalScreen):
-    """Blocking modal shown while apps are being fetched from the device.
-    Swallows all key input so the user cannot interact until loading ends.
-    """
-
-    CSS = """
-    LoadingScreen {
-        align: center middle;
-        background: $surface 60%;
-    }
-    #loading-box {
-        width: 44;
-        height: auto;
-        border: heavy $accent;
-        background: $panel;
-        padding: 1 2;
-        align: center middle;
-    }
-    #loading-title {
-        text-style: bold;
-        color: $accent;
-        content-align: center middle;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    LoadingIndicator {
-        height: 3;
-    }
-    #loading-msg {
-        content-align: center middle;
-        width: 100%;
-        color: $text-muted;
-        margin-top: 1;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Container(id="loading-box"):
-            yield Static("⏳  Fetching Installed Apps", id="loading-title")
-            yield LoadingIndicator()
-            yield Static("Please wait, this may take a moment...", id="loading-msg")
-
-    def on_key(self, event: events.Key) -> None:
-        # Absorb all key presses; nothing is actionable while loading.
-        event.stop()
-        event.prevent_default()
-
-
-class HelpScreen(ModalScreen):
-    """Modal screen listing all keybindings."""
-
-    CSS = """
-    HelpScreen {
-        align: center middle;
-    }
-    #help-box {
-        width: 64;
-        height: auto;
-        max-height: 80%;
-        border: heavy $accent;
-        background: $panel;
-        padding: 1 2;
-    }
-    #help-title {
-        text-style: bold;
-        color: $accent;
-        content-align: center middle;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    .help-row {
-        width: 100%;
-    }
-    #help-footer {
-        margin-top: 1;
-        content-align: center middle;
-        width: 100%;
-        color: $text-muted;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Container(id="help-box"):
-            yield Static("⌨  Keybindings", id="help-title")
-            for key, desc in KEYBINDINGS:
-                yield Static(f"[bold $accent]{key:<10}[/] {desc}", classes="help-row")
-            yield Static("\nPress Esc, ?, or Enter to close", id="help-footer")
-
-    def on_key(self, event: events.Key) -> None:
-        if event.key in ("escape", "question_mark", "enter"):
-            self.dismiss()
-        event.stop()
-
-
-class NoDeviceScreen(Screen):
-    """Error screen shown when no adb device is connected."""
-
-    CSS = """
-    NoDeviceScreen {
-        align: center middle;
-        background: $surface;
-    }
-    #error-box {
-        width: 64;
-        height: auto;
-        border: heavy $error;
-        padding: 2 4;
-        background: $panel;
-        color: $text;
-    }
-    #error-title {
-        text-style: bold;
-        color: $error;
-        content-align: center middle;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    #error-msg, #error-msg2 {
-        content-align: center middle;
-        width: 100%;
-    }
-    """
-
-    def __init__(self, message: str):
-        super().__init__()
-        self.message = message
-
-    def compose(self) -> ComposeResult:
-        with Container(id="error-box"):
-            yield Static("⚠  No ADB Device Found", id="error-title")
-            yield Static(self.message, id="error-msg")
-            yield Static("\nPress 'q' to quit.", id="error-msg2")
-
-    def on_key(self, event: events.Key) -> None:
-        if event.key == "q":
-            self.app.exit()
-        event.stop()
 
 
 class ScrcpyLauncher(App):
@@ -329,7 +94,7 @@ class ScrcpyLauncher(App):
     }
 
     #apps-table {
-        margin: 1 2 1 2;
+        margin: 0 1 0 1;
         background: $surface;
         border: round $primary;
     }
@@ -347,20 +112,18 @@ class ScrcpyLauncher(App):
     }
 
     DataTable > .datatable--cursor {
-        background: $accent;
+        background: $accent 40%;
         color: $text;
+        text-style: bold;
     }
 
     OptionList > .option-list--option-highlighted {
-        background: $accent;
+        background: $accent 40%;
         color: $text;
+        text-style: bold;
     }
     """
 
-    # Global bindings also drive the visible Footer hints. These only fire
-    # when the currently focused widget doesn't itself consume the key —
-    # typing "/" or "?" while the search Input is focused is handled by the
-    # Input's own character-insertion logic and never reaches these.
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+r", "refresh_apps", "Refresh"),
@@ -376,7 +139,7 @@ class ScrcpyLauncher(App):
         self.current_filter: str = "all"
         self.status_text: str = "Loading installed apps..."
         self.is_loading: bool = True
-        self.maximized_panel: Optional[str] = None  # "filter" | "apps" | None
+        self.maximized_panel: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -407,14 +170,16 @@ class ScrcpyLauncher(App):
 
         self.query_one("#search-input", Input).focus()
 
-        has_device, dev_msg = await self.check_adb_device()
-        if not has_device:
+        adb_status, dev_msg = await self.check_adb_device()
+        if adb_status == "none":
             self.is_loading = False
             await self.push_screen(NoDeviceScreen(dev_msg))
             return
+        elif adb_status == "unauthorized":
+            self.is_loading = False
+            await self.push_screen(UnauthorizedScreen())
+            return
 
-        # Block all interaction with a modal loading overlay until the
-        # bulk adb fetch/parse completes.
         self.is_loading = True
         await self.push_screen(LoadingScreen())
         self.load_apps()
@@ -422,7 +187,7 @@ class ScrcpyLauncher(App):
     async def check_adb_device(self):
         if shutil.which("adb") is None:
             return (
-                False,
+                "none",
                 "The 'adb' binary was not found in PATH.\nPlease install Android platform-tools.",
             )
         try:
@@ -435,26 +200,48 @@ class ScrcpyLauncher(App):
             stdout, _ = await proc.communicate()
         except FileNotFoundError:
             return (
-                False,
+                "none",
                 "The 'adb' binary was not found in PATH.\nPlease install Android platform-tools.",
             )
 
         lines = stdout.decode(errors="ignore").strip().splitlines()
         devices = []
+        unauthorized = False
         for ln in lines[1:]:
             ln = ln.strip()
             if not ln:
                 continue
             parts = ln.split()
-            if len(parts) >= 2 and parts[1] == "device":
-                devices.append(parts[0])
+            if len(parts) >= 2:
+                if parts[1] == "device":
+                    devices.append(parts[0])
+                elif parts[1] == "unauthorized":
+                    unauthorized = True
 
+        if unauthorized:
+            return "unauthorized", ""
         if not devices:
             return (
-                False,
+                "none",
                 "No connected Android devices/emulators were detected.\nConnect a device and enable USB debugging.",
             )
-        return True, ""
+        return "device", ""
+
+    async def check_device_and_proceed(self):
+        """Checks for device authorization and proceeds to loading if authorized."""
+        if not isinstance(self.screen, UnauthorizedScreen):
+            return
+
+        adb_status, dev_msg = await self.check_adb_device()
+
+        if adb_status == "device":
+            await self.pop_screen()
+            self.is_loading = True
+            await self.push_screen(LoadingScreen())
+            self.load_apps()
+        elif adb_status == "none":
+            await self.pop_screen()
+            await self.push_screen(NoDeviceScreen(dev_msg))
 
     @work(exclusive=True)
     async def load_apps(self) -> None:
@@ -470,7 +257,9 @@ class ScrcpyLauncher(App):
             )
             stdout, _ = await proc.communicate()
         except Exception as e:
-            self.status_text = f"Error running adb: {e}"
+            self.push_screen(
+                ErrorScreen(title="ADB Error", message=f"Error running adb: {e}")
+            )
             self._finish_loading()
             return
 
@@ -505,7 +294,6 @@ class ScrcpyLauncher(App):
         self._finish_loading()
 
     def _finish_loading(self) -> None:
-        """Dismiss the loading overlay and restore normal interaction."""
         self.is_loading = False
         if isinstance(self.screen, LoadingScreen):
             self.pop_screen()
@@ -596,26 +384,65 @@ class ScrcpyLauncher(App):
     def launch_scrcpy(self, package_id: str) -> None:
         if not package_id or self.is_loading:
             return
-        self.status_text = f"Launching {package_id} via scrcpy..."
+        self.status_text = f"Launching {package_id}..."
         self.update_status()
         try:
-            subprocess.Popen(
-                [
-                    "scrcpy",
-                    f"--new-display={SCRCPY_WIDTH}x{SCRCPY_HEIGHT}/{SCRCPY_DPI}",
-                    f"--start-app={package_id}",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
+            self.status_text = f"Starting scrcpy for {package_id}..."
+            self.update_status()
+
+            monitors = get_monitors()
+            primary_monitor = monitors[0] if monitors else None
+
+            scrcpy_command = [
+                "scrcpy",
+                "-f",
+                "--window-title",
+                f"App: {package_id}",
+                "--show-touches",
+                "--push-target=/sdcard/",
+                f"--start-app={package_id}",
+            ]
+            if primary_monitor:
+                dpi = 160
+                if primary_monitor.width >= 2560:
+                    dpi = 480
+                elif primary_monitor.width >= 1920:
+                    dpi = 320
+                scrcpy_command.append(
+                    f"--new-display={primary_monitor.width}x{primary_monitor.height}/{dpi}"
+                )
+
+            # For diagnostics, log scrcpy's output.
+            with open("scrcpy_launcher.log", "a") as logfile:
+                subprocess.Popen(
+                    scrcpy_command,
+                    stdout=logfile,
+                    stderr=logfile,
+                    start_new_session=True,
+                )
+
+            self.status_text = (
+                f"Launched: {package_id}. See scrcpy_launcher.log for details."
             )
-            self.status_text = f"Launched: {package_id}"
+            self.update_status()
+
         except FileNotFoundError:
-            self.status_text = "Error: 'scrcpy' binary not found in PATH."
+            self.push_screen(
+                ErrorScreen(
+                    title="Dependency Error",
+                    message="'adb' or 'scrcpy' not found in PATH.",
+                )
+            )
+        except subprocess.CalledProcessError as e:
+            err = e.stderr.decode().strip()
+            self.push_screen(
+                ErrorScreen(
+                    title="App Launch Error",
+                    message=f"Error starting app on device: {err}",
+                )
+            )
         except Exception as e:
-            self.status_text = f"Error launching scrcpy: {e}"
-        self.update_status()
+            self.push_screen(ErrorScreen(title="Unexpected Error", message=str(e)))
 
     def action_refresh_apps(self) -> None:
         if self.is_loading:
@@ -652,7 +479,6 @@ class ScrcpyLauncher(App):
             elif isinstance(focused, DataTable) and focused.id == "apps-table":
                 target = "apps"
             else:
-                # Nothing sensible to maximize (e.g. search input focused).
                 return
 
             self.maximized_panel = target
@@ -672,7 +498,6 @@ class ScrcpyLauncher(App):
         self.update_status()
 
     def _get_focused_navigable(self):
-        """Return the currently focused DataTable/OptionList, if any."""
         widget = self.screen.focused
         if isinstance(widget, (DataTable, OptionList)):
             return widget
@@ -702,14 +527,11 @@ class ScrcpyLauncher(App):
             widget.action_cursor_up()
 
     async def on_key(self, event: events.Key) -> None:
-        # While loading, or on modal screens, absorb navigation input here.
         if self.is_loading or isinstance(
             self.screen, (HelpScreen, NoDeviceScreen, LoadingScreen)
         ):
             return
 
-        # Determine mode directly from actual focus (not a stale flag) so
-        # navigation keys can never desync from what's really focused.
         focused = self.screen.focused
 
         if isinstance(focused, Input):
@@ -719,8 +541,6 @@ class ScrcpyLauncher(App):
                 event.stop()
             return
 
-        # Focus is NOT on the search Input: vim-style bindings are always
-        # live here, regardless of prior key history.
         if event.key == "i":
             self.action_focus_search()
             event.stop()
@@ -732,10 +552,10 @@ class ScrcpyLauncher(App):
             self.query_one("#apps-table", DataTable).focus()
             self.update_status()
             event.stop()
-        elif event.key in ("j", "down"):
+        elif event.key == "j":
             self._move_cursor(down=True)
             event.stop()
-        elif event.key in ("k", "up"):
+        elif event.key == "k":
             self._move_cursor(down=False)
             event.stop()
         elif event.key == "g":
@@ -752,5 +572,11 @@ class ScrcpyLauncher(App):
             event.stop()
 
 
+def main():
+    """The main entry point for the application."""
+    app = ScrcpyLauncher()
+    app.run()
+
+
 if __name__ == "__main__":
-    ScrcpyLauncher().run()
+    main()

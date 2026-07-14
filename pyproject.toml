@@ -1,0 +1,28 @@
+[project]
+name = "android-desktop-mode"
+version = "0.1.0"
+description = "A Textual-based TUI launcher for managing and launching Android apps via scrcpy."
+authors = [{ name = "Your Name", email = "your@email.com" }]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "textual==8.2.8",
+    "screeninfo==0.8.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "pytest-mock==3.14.0",
+]
+
+[project.scripts]
+android-desktop-mode = "app:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

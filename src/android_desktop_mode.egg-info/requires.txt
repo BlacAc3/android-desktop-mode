@@ -1,0 +1,7 @@
+textual==8.2.8
+screeninfo==0.8.1
+
+[dev]
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-mock==3.14.0

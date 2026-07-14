@@ -1,0 +1,82 @@
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 234.1 MB/s (732226 bytes in 0.003s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  5c6c35e6                        device  2112123AG
+INFO: Renderer: opengl
+INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
+INFO: Trilinear filtering enabled
+INFO: Texture: 1080x2400
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 477.1 MB/s (732226 bytes in 0.001s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+[server] INFO: Device display turned off
+[server] INFO: Device display turned off
+[server] INFO: Device display turned off
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  5c6c35e6                        device  2112123AG
+INFO: Renderer: opengl
+INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
+INFO: Trilinear filtering enabled
+INFO: Texture: 1080x2400
+ERROR: Cannot request to show touches if control is disabled
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+ERROR: Cannot request to show touches if control is disabled
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+ERROR: Cannot request to show touches if control is disabled
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 532.6 MB/s (732226 bytes in 0.001s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  5c6c35e6                        device  2112123AG
+INFO: Renderer: opengl
+INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
+INFO: Trilinear filtering enabled
+INFO: Texture: 1080x2400
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 439.1 MB/s (732226 bytes in 0.002s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+[server] INFO: New display: 1920x1080/352 (id=37)
+[server] INFO: Starting app "WhatsApp" [com.whatsapp] on display 37...
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  5c6c35e6                        device  2112123AG
+INFO: Renderer: opengl
+INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
+INFO: Trilinear filtering enabled
+INFO: Texture: 1920x1080
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 575.9 MB/s (732226 bytes in 0.001s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+[server] INFO: New display: 1920x1080/352 (id=38)
+[server] INFO: Starting app "WhatsApp" [com.whatsapp] on display 38...
+[server] INFO: Device clipboard set
+[server] INFO: Device display turned off
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  5c6c35e6                        device  2112123AG
+INFO: Renderer: opengl
+INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
+INFO: Trilinear filtering enabled
+INFO: Texture: 1920x1080
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 392.5 MB/s (732226 bytes in 0.002s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+[server] INFO: New display: 1920x1080/320 (id=39)
+[server] INFO: Starting app "WhatsApp" [com.whatsapp] on display 39...
+/usr/share/scrcpy/scrcpy-server: 1 file pushed, 0 skipped. 367.9 MB/s (732226 bytes in 0.002s)
+[server] INFO: Device: [Xiaomi] Xiaomi 2112123AG (Android 13)
+WARN: Could not set window icon: wayland: cannot set icon; required xdg_toplevel_icon_v1 protocol not supported
+[server] INFO: New display: 1920x1080/320 (id=40)
+[server] INFO: Starting app "MetaTrader 5" [net.metaquotes.metatrader5] on display 40...
+scrcpy 4.0 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  5c6c35e6                        device  2112123AG
+INFO: Renderer: opengl
+INFO: OpenGL version: 4.6 (Compatibility Profile) Mesa 26.1.1-arch1.2
+INFO: Trilinear filtering enabled
+INFO: Texture: 1920x1080

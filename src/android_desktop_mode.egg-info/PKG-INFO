@@ -1,0 +1,78 @@
+Metadata-Version: 2.4
+Name: android-desktop-mode
+Version: 0.1.0
+Summary: A Textual-based TUI launcher for managing and launching Android apps via scrcpy.
+Author-email: Your Name <your@email.com>
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: textual==8.2.8
+Requires-Dist: screeninfo==0.8.1
+Provides-Extra: dev
+Requires-Dist: pytest==8.3.4; extra == "dev"
+Requires-Dist: pytest-asyncio==0.25.0; extra == "dev"
+Requires-Dist: pytest-mock==3.14.0; extra == "dev"
+
+# Android Desktop Mode
+
+A Textual-based TUI launcher for managing and launching Android apps via `scrcpy`.
+
+## Features
+- **Modular Design:** Clean separation of concerns.
+- **Vim-style Navigation:** Efficient keyboard control.
+- **Filtering:** Filter apps by User or System types.
+- **Search:** Quickly find apps by name or package ID.
+- **Lightweight:** Runs in terminal.
+
+## Prerequisites
+- Python 3.8+
+- `scrcpy` installed and available in your PATH.
+- `adb` installed and available in your PATH.
+- An Android device connected with USB debugging enabled.
+
+## How It Works
+
+This application leverages Python's `textual` library to create a Terminal User Interface (TUI) for launching Android applications on your desktop using `scrcpy`.
+
+### Core Components
+
+*   **`app.py`**: The main application entry point. It defines the `ScrcpyLauncher` class, which is the central `textual` app. This class manages screens, handles key bindings, and launches `scrcpy` processes.
+*   **`screens.py`**: Contains the different UI screens for the application:
+    *   `AppListScreen`: Displays the list of installed applications.
+    *   `FilterScreen`: Allows filtering the application list.
+    *   `SearchScreen`: Provides a search input to find applications.
+    *   `HelpScreen`: Shows key bindings and other helpful information.
+*   **`utils.py`**: A collection of utility functions that interact with `adb` (Android Debug Bridge) and `scrcpy`. This includes functions to get the list of installed packages, check for device connections, and launch `scrcpy` with specific settings.
+*   **`models.py`**: Defines data classes used throughout the application, such as `AppInfo` to hold information about each Android application.
+*   **`bindings.py`**: Centralizes key bindings for the application.
+
+### Key Functionality
+
+1.  **Device Detection**: On startup, the app checks for a connected Android device using `adb`. It will wait for a device to be authorized.
+2.  **App Fetching**: It fetches a list of all installed applications from the connected device.
+3.  **UI Navigation**: The user can navigate the list of apps, filter them by name, or search for a specific app.
+4.  **App Launching**: When an app is selected, the application uses `scrcpy` to launch it on the desktop in a fullscreen window. It's configured to mirror the device in "desktop mode" using the computer's screen resolution, turn the device's screen off to save power, and show touches on the mirrored display.
+
+## Installation
+
+To install the application, clone this repository and run the following commands in your terminal:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+## Usage
+
+After installation, simply run the following command in your terminal:
+
+```bash
+android-desktop-mode
+```
+
+## Running Tests
+
+To run the test suite, use `pytest`:
+```bash
+pytest
+```

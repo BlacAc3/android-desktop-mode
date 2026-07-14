@@ -1,0 +1,2 @@
+[console_scripts]
+android-desktop-mode = app:main

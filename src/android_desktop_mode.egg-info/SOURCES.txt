@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/__init__.py
+src/app.py
+src/bindings.py
+src/models.py
+src/screens.py
+src/utils.py
+src/android_desktop_mode.egg-info/PKG-INFO
+src/android_desktop_mode.egg-info/SOURCES.txt
+src/android_desktop_mode.egg-info/dependency_links.txt
+src/android_desktop_mode.egg-info/entry_points.txt
+src/android_desktop_mode.egg-info/requires.txt
+src/android_desktop_mode.egg-info/top_level.txt
+tests/test_app.py
+tests/test_utils.py

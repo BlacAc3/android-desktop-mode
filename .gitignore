@@ -1,2 +1,9 @@
 venv/
 scrcpy_launcher.log
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info
+build/
+dist/
+
